@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1 to 9 실시간 숫자 대결</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        :root { --p1: #ff4757; --p2: #2e86de; --bg: #2f3542; }
+        body { font-family: 'Pretendard', sans-serif; background: var(--bg); color: white; text-align: center; padding: 20px; margin: 0; }
+        .container { max-width: 400px; margin: 0 auto; background: #3f4452; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .status { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; margin-bottom: 20px; color: #7bed9f; font-weight: bold; min-height: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+        .card { aspect-ratio: 1/1; background: white; color: var(--bg); border: none; border-radius: 12px; font-size: 1.5rem; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .card:hover:not(:disabled) { transform: scale(1.05); background: #f1f2f6; }
+        .card:disabled { background: #747d8c; color: #2f3542; cursor: default; opacity: 0.5; }
+        .score-box { display: flex; justify-content: space-between; padding: 15px; border-top: 1px solid #57606f; font-size: 1.1rem; }
+        .share-btn { background: #57606f; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; margin-top: 10px; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🔢 1 to 9 숫자 대결</h2>
+    <div id="status" class="status">접속 중...</div>
+    
+    <div id="game-ui" style="display:none;">
+        <div id="round-text" style="margin-bottom:10px; color:#a4b0be;">ROUND 1 / 9</div>
+        <div class="grid" id="card-grid"></div>
+        <div class="score-box">
+            <div style="color:var(--p1)">나: <span id="my-score">0</span></div>
+            <div style="color:var(--p2)">상대: <span id="op-score">0</span></div>
+        </div>
+    </div>
+
+    <div id="setup-ui">
+        <p>링크를 복사해서 친구에게 보내세요!</p>
+        <button class="share-btn" onclick="copyLink()">🔗 게임 링크 복사하기</button>
+        <p style="font-size: 0.7rem; color: #a4b0be; margin-top: 15px;">※ 같은 링크(주소)로 접속해야 만날 수 있습니다.</p>
+    </div>
+</div>
+
+<script>
+    let peer, conn, myCards = [1,2,3,4,5,6,7,8,9];
+    let myPick = null, opPick = null, myScore = 0, opScore = 0, round = 1;
+    
+    // 방 ID 생성 (URL의 해시값 사용, 없으면 랜덤 생성)
+    if(!window.location.hash) window.location.hash = 'room-' + Math.floor(Math.random()*10000);
+    const roomID = window.location.hash.substring(1);
+
+    function initPeer() {
+        // 먼저 호스트로 접속 시도
+        peer = new Peer(roomID + "-host");
+
+        peer.on('open', () => {
+            document.getElementById('status').innerText = "친구를 기다리는 중...";
+        });
+
+        peer.on('error', (err) => {
+            if(err.type === 'unavailable-id') {
+                // 이미 호스트가 있다면 게스트로 접속
+                peer = new Peer();
+                peer.on('open', () => {
+                    conn = peer.connect(roomID + "-host");
+                    setupConn();
+                });
+            }
+        });
+
+        peer.on('connection', (c) => {
+            conn = c;
+            setupConn();
+        });
+    }
+
+    function setupConn() {
+        conn.on('open', () => {
+            document.getElementById('status').innerText = "연결 완료! 대결 시작";
+            document.getElementById('setup-ui').style.display = 'none';
+            document.getElementById('game-ui').style.display = 'block';
+            render();
+        });
+        conn.on('data', (data) => {
+            if(data.type === 'pick') { opPick = data.value; check(); }
+        });
+    }
+
+    function render() {
+        const grid = document.getElementById('card-grid');
+        grid.innerHTML = '';
+        [1,2,3,4,5,6,7,8,9].forEach(n => {
+            const btn = document.createElement('button');
+            btn.className = 'card';
+            btn.innerText = n;
+            btn.disabled = !myCards.includes(n) || myPick !== null;
+            btn.onclick = () => {
+                myPick = n;
+                myCards = myCards.filter(c => c !== n);
+                conn.send({type: 'pick', value: n});
+                document.getElementById('status').innerText = "상대방 선택 대기 중...";
+                render();
+                check();
+            };
+            grid.appendChild(btn);
+        });
+    }
+
+    function check() {
+        if(myPick && opPick) {
+            let win = 0; // 1:나, 2:상대
+            if(myPick === 1 && opPick === 9) win = 1;
+            else if(myPick === 9 && opPick === 1) win = 2;
+            else if(myPick > opPick) win = 1;
+            else if(opPick > myPick) win = 2;
+
+            if(win === 1) myScore++; else if(win === 2) opScore++;
+            
+            setTimeout(() => {
+                alert(`결과\n나: ${myPick} vs 상대: ${opPick}\n\n${win === 1 ? '라운드 승리! 🎉' : (win === 2 ? '라운드 패배.. 💀' : '무승부')}`);
+                document.getElementById('my-score').innerText = myScore;
+                document.getElementById('op-score').innerText = opScore;
+                myPick = null; opPick = null; round++;
+                
+                if(round > 9) {
+                    const final = myScore > opScore ? "최종 우승!! 🏆" : (myScore < opScore ? "최종 패배.." : "무승부");
+                    alert(`게임 종료!\n최종 결과 ${myScore}:${opScore}\n${final}`);
+                    location.reload();
+                } else {
+                    document.getElementById('round-text').innerText = `ROUND ${round} / 9`;
+                    document.getElementById('status').innerText = "다음 숫자를 고르세요.";
+                    render();
+                }
+            }, 100);
+        }
+    }
+
+    function copyLink() {
+        navigator.clipboard.writeText(window.location.href);
+        alert("링크가 복사되었습니다! 친구에게 보내세요.");
+    }
+
+    initPeer();
+</script>
+</body>
+</html>
